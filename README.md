@@ -33,6 +33,14 @@ Your router updates its own model catalog from a signed feed: new free models, q
 
 </div>
 
+> **Self-hosted automation additions in this fork:** per-bot virtual keys
+> (`sk-bot-`) with quotas and a priority queue, four selectable routing
+> strategies and model aliases (`auto`/`fast`/`smart`/`coding`), one-link tunnel
+> modes (local / Cloudflare / Tailscale / ngrok), and `/health` + `/metrics`.
+> See [BOT-AUTOMATION.md](BOT-AUTOMATION.md), [TUNNEL.md](TUNNEL.md),
+> [BENCHMARK.md](BENCHMARK.md), [SIMULATION.md](SIMULATION.md) and
+> [AGENT.md](AGENT.md). Upstream MIT license and credit are unchanged.
+
 ---
 
 ## Contents
