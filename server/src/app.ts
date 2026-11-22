@@ -30,6 +30,7 @@ import { authRouter } from './routes/auth.js';
 import { docsRouter } from './routes/docs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { statusRouter, providersRouter } from './routes/status.js';
+import { opsRouter } from './routes/ops.js';
 import { geminiRouter } from './routes/gemini.js';
 import { ollamaRouter } from './routes/ollama.js';
 import { urlTokenRouter } from './routes/url-tokens.js';
@@ -353,6 +354,12 @@ export function createApp(config?: Config) {
   // unauthenticated brute-force must not get a free throttle-less oracle here.
   app.use('/mcp', createProxyRateLimiter(cfg.proxyRateLimitRpm));
   app.use('/mcp', mcpRouter);
+
+  // Self-hosted ops surface: GET /health (JSON health snapshot) and
+  // GET /metrics (Prometheus text). Unauthenticated like /livez and /readyz,
+  // but mounted after the /api rate limiter so neither can be spun on without
+  // throttling. The metrics sink is in-process and allocation-free on the hot path.
+  app.use(opsRouter);
 
   // Liveness / readiness probes for orchestrators (GET /livez, /readyz, #433).
   // Unauthenticated so a load balancer can probe them; registered before the
