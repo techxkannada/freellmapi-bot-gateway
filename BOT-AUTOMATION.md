@@ -61,6 +61,9 @@ route through the full `auto` failover chain and appear in `/v1/models`.
 
 ## Ops
 
+- Keep-alive pooling (75s inbound, undici upstream) and optional HTTP/2 for
+  direct upstream calls via `UPSTREAM_HTTP2=1`. SSE responses are never buffered
+  or gzipped.
 - `GET /health` — readiness with key status, cooldowns, bot counts and traffic.
 - `GET /metrics` — Prometheus counters/gauges (no auth, no secrets).
 - `GET /livez`, `GET /readyz` — unchanged load-balancer probes.
