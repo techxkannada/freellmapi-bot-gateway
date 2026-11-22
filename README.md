@@ -37,7 +37,8 @@ Your router updates its own model catalog from a signed feed: new free models, q
 > (`sk-bot-`) with quotas and a priority queue, four selectable routing
 > strategies and model aliases (`auto`/`fast`/`smart`/`coding`), one-link tunnel
 > modes (local / Cloudflare / Tailscale / ngrok), and `/health` + `/metrics`.
-> See [BOT-AUTOMATION.md](BOT-AUTOMATION.md), [TUNNEL.md](TUNNEL.md),
+> See [MANUAL.md](MANUAL.md) for every command and method, plus
+> [BOT-AUTOMATION.md](BOT-AUTOMATION.md), [TUNNEL.md](TUNNEL.md),
 > [BENCHMARK.md](BENCHMARK.md), [SIMULATION.md](SIMULATION.md) and
 > [AGENT.md](AGENT.md). Upstream MIT license and credit are unchanged.
 

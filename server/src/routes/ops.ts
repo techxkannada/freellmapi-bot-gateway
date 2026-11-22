@@ -54,7 +54,7 @@ function dbSnapshot(): DbSnapshot {
   const profiles = db.prepare('SELECT COUNT(*) AS n FROM client_profiles').get() as { n: number };
   let bots = 0;
   try {
-    bots = (db.prepare("SELECT COUNT(*) AS n FROM bot_keys WHERE seed_version = 'live'").get() as { n: number }).n;
+    bots = (db.prepare('SELECT COUNT(*) AS n FROM bot_keys').get() as { n: number }).n;
   } catch {
     // The bot-key table is created by its own migration; an install that has
     // not run it yet still gets a valid health report.
