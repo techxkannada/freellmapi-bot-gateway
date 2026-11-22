@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import { getDb, getUnifiedApiKey } from '../db/index.js';
+import { BOT_KEY_PREFIX, getBotByToken } from '../services/bot-keys.js';
 
 // Per-client API keys with server-enforced system prompts (#411). A client
 // profile is a second kind of inference credential: it authenticates ONLY the
@@ -38,7 +39,8 @@ export function hashClientProfileKey(key: string): string {
 
 export type ResolvedAuth =
   | { kind: 'unified'; systemPrompt: null }
-  | { kind: 'profile'; profileId: number; name: string; systemPrompt: string | null };
+  | { kind: 'profile'; profileId: number; name: string; systemPrompt: string | null }
+  | { kind: 'bot'; botId: number; name: string; systemPrompt: null };
 
 interface ProfileRow {
   id: number;
@@ -57,6 +59,12 @@ export function resolveAuth(token: string | undefined): ResolvedAuth | null {
   if (!token) return null;
   if (timingSafeStringEqual(token, getUnifiedApiKey())) {
     return { kind: 'unified', systemPrompt: null };
+  }
+  // Bot keys are admitted (quota + queue) by middleware/bot-guard.ts before
+  // the router runs; here we only resolve the identity for session scoping.
+  if (token.startsWith(BOT_KEY_PREFIX)) {
+    const bot = getBotByToken(token);
+    return bot ? { kind: 'bot', botId: bot.id, name: bot.name, systemPrompt: null } : null;
   }
   if (!token.startsWith(CLIENT_PROFILE_KEY_PREFIX)) return null;
   const row = getDb().prepare(

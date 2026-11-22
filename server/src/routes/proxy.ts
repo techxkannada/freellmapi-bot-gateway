@@ -298,7 +298,9 @@ function getSessionKey(messages: ChatMessage[], sessionIdHeader?: string, strate
 // another profile's (or the unified key's) traffic wrote.
 function callerScopedSessionKey(auth: ResolvedAuth, sessionKey: string): string {
   if (!sessionKey) return '';
-  return auth.kind === 'profile' ? `profile:${auth.profileId}:${sessionKey}` : `unified:${sessionKey}`;
+  if (auth.kind === 'profile') return `profile:${auth.profileId}:${sessionKey}`;
+  if (auth.kind === 'bot') return `bot:${auth.botId}:${sessionKey}`;
+  return `unified:${sessionKey}`;
 }
 
 export function getStickyModel(messages: ChatMessage[], sessionIdHeader?: string, strategyKey?: string): number | undefined {

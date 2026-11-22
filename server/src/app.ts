@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { keysRouter } from './routes/keys.js';
 import { clientProfilesRouter } from './routes/client-profiles.js';
+import { botsRouter } from './routes/bots.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { logsRouter } from './routes/logs.js';
 import { modelsRouter } from './routes/models.js';
@@ -39,6 +40,7 @@ import { moderationRouter } from './routes/moderation.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
+import { createBotGuard } from './middleware/bot-guard.js';
 
 // Password-guess ceiling for GET /api/keys/export. Deliberately low: a real
 // user exports keys occasionally, never ten times a minute.
@@ -279,6 +281,8 @@ export function createApp(config?: Config) {
   // /api — the profile keys it mints authenticate only the /v1 inference
   // surface and are never valid here.
   app.use('/api/client-profiles', requireAuth, clientProfilesRouter);
+  // Bot virtual keys: same dashboard-session gate as every other admin route.
+  app.use('/api/bots', requireAuth, botsRouter);
   // Saved Playground transcripts (the chat sidebar). Dashboard-session gated
   // like every other admin route; the unified /v1 key does not open it.
   app.use('/api/conversations', requireAuth, conversationsRouter);
@@ -327,6 +331,11 @@ export function createApp(config?: Config) {
   app.use('/v1/t/:token', createProxyRateLimiter(cfg.proxyRateLimitRpm));
   app.use('/v1/t/:token', urlTokenRouter);
 
+  // Bot virtual keys are admitted on every inference surface: quota check,
+  // priority queue slot, and usage accounting. Non-bot credentials fall through.
+  const botGuard = createBotGuard();
+  app.use('/v1', botGuard);
+
   // OpenAI-compatible proxy. Per-IP rate limiting (#35 item #6) runs first so
   // it throttles unauthenticated brute-force / flood attempts before any
   // routing work. Tune via PROXY_RATE_LIMIT_RPM; 0 disables it.
@@ -344,6 +353,7 @@ export function createApp(config?: Config) {
   app.use('/v1', responsesRouter);
 
   // Native Gemini wire surface for Gemini CLI and Gemini-lineage agents.
+  app.use('/v1beta', botGuard);
   app.use('/v1beta', createProxyRateLimiter(cfg.proxyRateLimitRpm));
   app.use('/v1beta', geminiRouter);
 
@@ -352,6 +362,7 @@ export function createApp(config?: Config) {
   // like /v1 — NOT behind the dashboard session gate. Same per-IP limiter as
   // /v1 (its own bucket): both surfaces guard the same unified key, so an
   // unauthenticated brute-force must not get a free throttle-less oracle here.
+  app.use('/mcp', botGuard);
   app.use('/mcp', createProxyRateLimiter(cfg.proxyRateLimitRpm));
   app.use('/mcp', mcpRouter);
 
