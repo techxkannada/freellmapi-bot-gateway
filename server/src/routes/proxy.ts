@@ -41,6 +41,7 @@ import { isUnifyEnabled, getModelGroups, resolveRequestedIdForDispatch } from '.
 import { advertisedContextWindow, buildModelListing, servableContextWindow, type NormalizedModel } from '../services/model-listing.js';
 import { buildCodexCatalog } from '../services/codex-catalog.js';
 import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../services/anthropic-map.js';
+import { applyModelAlias, isModelAlias, modelAliasEntries } from '../services/model-aliases.js';
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
@@ -500,6 +501,18 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
     : listed;
 
   return [
+    ...modelAliasEntries().filter(entry => entry.id !== 'auto').map(entry => ({
+      id: entry.id,
+      object: 'model',
+      created: 0,
+      owned_by: entry.owned_by,
+      name: entry.name,
+      context_window: autoContextWindow,
+      context_length: autoContextWindow,
+      available: autoContextWindow != null,
+      unavailable_reason: autoContextWindow != null ? null : 'no_models',
+      routing_strategy: entry.strategy,
+    })),
     {
       id: AUTO_MODEL_ID,
       object: 'model',
@@ -1468,8 +1481,14 @@ proxyRouter.post('/completions', async (req: Request, res: Response) => {
   const requestedModelLabel = clientModel ?? 'auto';
   // Claude alias from GET /v1/models → the Claude family map, as on /v1/chat/completions.
   const claudeAlias = resolveListedClaudeAlias(clientModel);
-  const requestedModel = claudeAlias?.kind === 'model' ? claudeAlias.modelId : claudeAlias ? 'auto' : clientModel;
+  let requestedModel = claudeAlias?.kind === 'model' ? claudeAlias.modelId : claudeAlias ? 'auto' : clientModel;
   const aliasTierChain = claudeAlias?.kind === 'tier' ? resolveModelGroupCandidates(claudeAlias.dbIds) : [];
+  // fast/smart/coding are router aliases: run the full auto chain with a
+  // request-scoped preset bias, never a separate (weaker) routing path.
+  if (isModelAlias(clientModel)) {
+    applyModelAlias(clientModel);
+    if (!claudeAlias) requestedModel = 'auto';
+  }
   const max_tokens = parsed.data.max_tokens != null && parsed.data.max_tokens > 0
     ? parsed.data.max_tokens : 128;
   const stop = providerSafeStop(parsed.data.stop);
@@ -1933,8 +1952,13 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // A Claude alias from GET /v1/models routes through the Claude family map
   // (a pinned model, auto, or a tier pool), the same as on /v1/messages.
   const claudeAlias = resolveListedClaudeAlias(clientModel);
-  const requestedModel = claudeAlias?.kind === 'model' ? claudeAlias.modelId : claudeAlias ? 'auto' : clientModel;
+  let requestedModel = claudeAlias?.kind === 'model' ? claudeAlias.modelId : claudeAlias ? 'auto' : clientModel;
   const aliasTierChain = claudeAlias?.kind === 'tier' ? resolveModelGroupCandidates(claudeAlias.dbIds) : [];
+  // fast/smart/coding route through auto with a preset bias — see completions.
+  if (isModelAlias(clientModel)) {
+    applyModelAlias(clientModel);
+    if (!claudeAlias) requestedModel = 'auto';
+  }
   // Agent-tolerant knob normalization (#200): max_tokens <= 0 means "no
   // limit" in several clients → unset; tool_choice 'any' is OpenAI's
   // 'required'; tool definitions get their 'function' type re-defaulted.

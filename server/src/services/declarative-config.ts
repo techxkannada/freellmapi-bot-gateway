@@ -105,7 +105,7 @@ const declarativeConfigSchema = z.object({
   models: z.array(modelSchema).optional(),
   fallback: z.array(fallbackEntrySchema).optional(),
   routing: z.object({
-    strategy: z.enum(['priority', 'balanced', 'smartest', 'fastest', 'reliable', 'custom', 'decision']),
+    strategy: z.enum(['priority', 'balanced', 'smartest', 'fastest', 'reliable', 'custom', 'decision', 'round-robin', 'least-used', 'lowest-latency']),
     weights: z.object({
       reliability: z.number().nonnegative(),
       speed: z.number().nonnegative(),
@@ -113,7 +113,7 @@ const declarativeConfigSchema = z.object({
     }).optional(),
     // Which key of a platform to reach for (#919); orthogonal to `strategy`,
     // which ranks models. Omitted leaves the persisted value alone.
-    keySelectionStrategy: z.enum(['auto', 'least-remaining']).optional(),
+    keySelectionStrategy: z.enum(['auto', 'least-remaining', 'round-robin', 'least-used', 'lowest-latency']).optional(),
   }).optional(),
 }).strict();
 

@@ -33,7 +33,11 @@ export interface RoutingWeights {
 // router.ts) or 'decision' (#1354: a decision model picks one of the four
 // presets per request — see services/routing-decision.ts). Each resolves to a
 // weight vector — the engine is identical.
-export type RoutingStrategy = 'priority' | 'balanced' | 'smartest' | 'fastest' | 'reliable' | 'custom' | 'decision';
+export type RoutingStrategy = 'priority' | 'balanced' | 'smartest' | 'fastest' | 'reliable' | 'custom' | 'decision'
+  // Operator-facing selection policies for bot-heavy installs. Each resolves
+  // to an existing weight vector; the difference is WHICH KEY of a model gets
+  // the first attempt (see effectiveKeySelectionStrategy in router.ts).
+  | 'round-robin' | 'least-used' | 'lowest-latency';
 
 /** The presets a decision model may choose between, per request. */
 export type PresetStrategy = 'balanced' | 'smartest' | 'fastest' | 'reliable';
@@ -44,7 +48,14 @@ export type PresetStrategy = 'balanced' | 'smartest' | 'fastest' | 'reliable';
 // would mean switching key policy also switches (or disables) the model bandit.
 // 'auto' is the historical behaviour — per-key bandit score, else round-robin.
 // 'least-remaining' additionally ranks by observed remaining quota (#919).
-export type KeySelectionStrategy = 'auto' | 'least-remaining';
+export type KeySelectionStrategy = 'auto' | 'least-remaining' | 'round-robin' | 'least-used' | 'lowest-latency';
+
+/** Map a routing strategy to the key policy it implies. Returns undefined for
+ *  strategies that leave key selection to the explicit key setting. */
+export function keyPolicyForStrategy(strategy: RoutingStrategy): KeySelectionStrategy | undefined {
+  if (strategy === 'round-robin' || strategy === 'least-used' || strategy === 'lowest-latency') return strategy;
+  return undefined;
+}
 
 export const BANDIT_PRESETS: Record<PresetStrategy, RoutingWeights> = {
   // Reliability leads; speed and intelligence split the rest evenly.

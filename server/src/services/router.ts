@@ -18,7 +18,7 @@ import {
 } from './ratelimit.js';
 import {
   BANDIT_PRESETS, DEFAULT_STRATEGY, type PresetStrategy, type RoutingStrategy, type RoutingWeights,
-  type KeySelectionStrategy,
+  type KeySelectionStrategy, keyPolicyForStrategy,
   reliabilityPosterior, expectedReliability, sampleBeta,
   speedScore, intelligenceScore, intelligenceComposite, headroomFactor, rateWindowHeadroomFactor,
   rateLimitFactor, combineScore,
@@ -519,7 +519,10 @@ export const EXPLORE_CHANCE = 0.1;
 /** A model counts as "has data" once its decay-weighted success+failure
  *  pseudo-count reaches this many samples. */
 export const EXPLORE_MIN_SAMPLES = 5;
-const VALID_STRATEGIES: RoutingStrategy[] = ['priority', 'balanced', 'smartest', 'fastest', 'reliable', 'custom', 'decision'];
+const VALID_STRATEGIES: RoutingStrategy[] = [
+  'priority', 'balanced', 'smartest', 'fastest', 'reliable', 'custom', 'decision',
+  'round-robin', 'least-used', 'lowest-latency',
+];
 
 export function getRoutingStrategy(): RoutingStrategy {
   const raw = getSetting(STRATEGY_KEY);
@@ -594,7 +597,9 @@ export function setPeakHoursConfig(patch: Partial<PeakHoursConfig>): void {
 //                       key first, so the key closest to its cap is held back
 //                       instead of being the next one to 429.
 const KEY_SELECTION_KEY = 'key_selection_strategy';
-const VALID_KEY_SELECTIONS: KeySelectionStrategy[] = ['auto', 'least-remaining'];
+const VALID_KEY_SELECTIONS: KeySelectionStrategy[] = [
+  'auto', 'least-remaining', 'round-robin', 'least-used', 'lowest-latency',
+];
 export const DEFAULT_KEY_SELECTION: KeySelectionStrategy = 'auto';
 
 export function getKeySelectionStrategy(): KeySelectionStrategy {
@@ -764,6 +769,10 @@ function weightsWithPeak(strategy: RoutingStrategy): { weights: RoutingWeights |
   // 'decision' outside a picked request (display, fusion, background) scores
   // as Balanced, the same preset an unsure or unavailable decision falls to.
   if (strategy === 'decision') return weightsWithPeak('balanced');
+  // The three operator selection policies differ in key choice, not in model
+  // scoring; they reuse the preset whose intent they carry.
+  if (strategy === 'round-robin' || strategy === 'least-used') return weightsWithPeak('balanced');
+  if (strategy === 'lowest-latency') return weightsWithPeak('fastest');
   return peakAdjustedWeights(BANDIT_PRESETS[strategy], strategy, getPeakHoursConfig());
 }
 
@@ -772,8 +781,19 @@ function weightsWithPeak(strategy: RoutingStrategy): { weights: RoutingWeights |
  *  other strategy is used as set. */
 export function effectiveRoutingStrategy(): RoutingStrategy {
   const strategy = getRoutingStrategy();
-  if (strategy !== 'decision') return strategy;
-  return getClientContext().routingStrategy ?? 'balanced';
+  // A request-scoped preset (decision model, bot key override, model alias)
+  // wins over the global setting. Under 'decision' it is the whole point of
+  // the strategy; under a fixed strategy it is an explicit per-request bias.
+  const scoped = getClientContext().routingStrategy;
+  if (scoped) return scoped;
+  if (strategy === 'decision') return 'balanced';
+  return strategy;
+}
+
+/** The key policy in force: the explicit key setting unless the global routing
+ *  strategy is one of the three operator-facing selection policies. */
+export function effectiveKeySelectionStrategy(): KeySelectionStrategy {
+  return keyPolicyForStrategy(getRoutingStrategy()) ?? getKeySelectionStrategy();
 }
 
 function weightsFor(strategy: RoutingStrategy): RoutingWeights | null {
@@ -1545,7 +1565,7 @@ const UNKNOWN_QUOTA_HEADROOM = 0.5;
  * for nothing (#919).
  */
 function quotaWeightingApplies(entry: ChainRow): boolean {
-  if (getKeySelectionStrategy() !== 'least-remaining') return false;
+  if (effectiveKeySelectionStrategy() !== 'least-remaining') return false;
   return !inferQuotaPoolKey(entry.platform as Platform, entry.model_id).endsWith('::account');
 }
 
@@ -1568,6 +1588,40 @@ function orderKeysByRemainingQuota(entry: ChainRow, ordered: KeyRow[]): KeyRow[]
   // lookup below must not re-derive anything per comparison.
   const room = new Map(ordered.map(k => [k.id, headroom.get(k.id) ?? UNKNOWN_QUOTA_HEADROOM]));
   return [...ordered].sort((a, b) => room.get(b.id)! - room.get(a.id)!);
+}
+
+/** Requests in the last 24h per key — the "least-used" policy's signal. Read
+ *  from the analytics table that the proxy already writes; no new state. */
+function keyUsageCounts(entry: ChainRow): Map<number, number> {
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const rows = getDb().prepare(`
+    SELECT key_id, COUNT(*) AS n FROM requests
+    WHERE platform = ? AND model_id = ? AND key_id IS NOT NULL AND created_at >= ?
+    GROUP BY key_id
+  `).all(entry.platform, entry.model_id, since) as Array<{ key_id: number; n: number }>;
+  return new Map(rows.map(r => [r.key_id, r.n]));
+}
+
+/** Roomiest key first by observed request count, stable on key id. */
+function orderKeysByLeastUsed(entry: ChainRow, keys: KeyRow[]): KeyRow[] {
+  const usage = keyUsageCounts(entry);
+  return [...keys].sort((a, b) =>
+    (usage.get(a.id) ?? 0) - (usage.get(b.id) ?? 0) || a.id - b.id);
+}
+
+/** Fastest observed key first (TTFB, then throughput). Keys with no timing
+ *  sample sort last but keep their incoming order among themselves. */
+function orderKeysByLatency(entry: ChainRow, keys: KeyRow[]): KeyRow[] {
+  if (!keyStatsCache) return keys;
+  const prefix = `${modelStatsKey(entry.platform, entry.model_id, entry.endpoint_scope)}:`;
+  return [...keys].sort((a, b) => {
+    const sa = keyStatsCache!.get(prefix + a.id);
+    const sb = keyStatsCache!.get(prefix + b.id);
+    const ta = sa?.avgTtfbMs ?? Number.POSITIVE_INFINITY;
+    const tb = sb?.avgTtfbMs ?? Number.POSITIVE_INFINITY;
+    if (ta !== tb) return ta - tb;
+    return (sb?.tokPerSec ?? 0) - (sa?.tokPerSec ?? 0) || a.id - b.id;
+  });
 }
 
 /**
@@ -1653,13 +1707,18 @@ function selectKeyForModel(entry: ChainRow, estimatedTokens: number, skipKeys?: 
   // cursor over the platform's key list (#651).
   const rrKey = modelStatsKey(entry.platform, entry.model_id, entry.endpoint_scope);
   let idx = roundRobinIndex.get(rrKey) ?? 0;
-  let ranked = orderKeysByScore(entry, keys);
-
-  // Remaining-quota weighting (#919) layers on top: it re-sorts whatever order
-  // we were going to walk anyway — the bandit ranking when there is per-key
-  // data, otherwise the round-robin rotation starting at the live cursor — so
-  // ties fall back to that order instead of to rowid.
-  if (keys.length > 1 && quotaWeightingApplies(entry)) {
+  const keyPolicy = effectiveKeySelectionStrategy();
+  // 'round-robin' is an explicit request for pure rotation — no bandit noise.
+  let ranked = keyPolicy === 'round-robin' ? null : orderKeysByScore(entry, keys);
+  if (keyPolicy === 'least-used') {
+    ranked = orderKeysByLeastUsed(entry, ranked ?? keys);
+  } else if (keyPolicy === 'lowest-latency') {
+    ranked = orderKeysByLatency(entry, ranked ?? keys);
+  } else if (keys.length > 1 && quotaWeightingApplies(entry)) {
+    // Remaining-quota weighting (#919) layers on top: it re-sorts whatever order
+    // we were going to walk anyway — the bandit ranking when there is per-key
+    // data, otherwise the round-robin rotation starting at the live cursor — so
+    // ties fall back to that order instead of to rowid.
     const base = ranked ?? Array.from({ length: keys.length }, (_, i) => keys[(idx + i) % keys.length]);
     ranked = orderKeysByRemainingQuota(entry, base);
   }
