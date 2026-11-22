@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { keysRouter } from './routes/keys.js';
 import { clientProfilesRouter } from './routes/client-profiles.js';
 import { botsRouter } from './routes/bots.js';
+import { tunnelRouter } from './routes/tunnel.js';
 import { conversationsRouter } from './routes/conversations.js';
 import { logsRouter } from './routes/logs.js';
 import { modelsRouter } from './routes/models.js';
@@ -283,6 +284,7 @@ export function createApp(config?: Config) {
   app.use('/api/client-profiles', requireAuth, clientProfilesRouter);
   // Bot virtual keys: same dashboard-session gate as every other admin route.
   app.use('/api/bots', requireAuth, botsRouter);
+  app.use('/api/tunnel', requireAuth, tunnelRouter);
   // Saved Playground transcripts (the chat sidebar). Dashboard-session gated
   // like every other admin route; the unified /v1 key does not open it.
   app.use('/api/conversations', requireAuth, conversationsRouter);

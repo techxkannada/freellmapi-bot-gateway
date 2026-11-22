@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1.7
+#
+# Optional image for operators who want a tunnel binary inside the container.
+# Build the base image first, then:
+#   docker build -t freellmapi:local .
+#   docker build -f Dockerfile.tunnel --build-arg BASE=freellmapi:local -t freellmapi:tunnel .
+#
+# Run with, for example:
+#   docker run -p 3001:3001 -e TUNNEL=cloudflare \
+#     -e CLOUDFLARE_TUNNEL_TOKEN=... freellmapi:tunnel
+#
+# Tokens stay in the environment (or your secret manager), never in the image.
+
+ARG BASE=freellmapi:local
+FROM ${BASE}
+
+USER root
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+  && install -m 0755 -d /etc/apt/keyrings \
+  \
+  # cloudflared (Cloudflare's official bookworm repository)
+  && curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+     | gpg --dearmor -o /etc/apt/keyrings/cloudflare-main.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared bookworm main" \
+     > /etc/apt/sources.list.d/cloudflared.list \
+  \
+  # tailscale (Tailscale's official bookworm repository)
+  && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+     > /etc/apt/keyrings/tailscale-archive-keyring.gpg \
+  && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+     > /etc/apt/sources.list.d/tailscale.list \
+  \
+  # ngrok agent (ngrok's official apt repository)
+  && curl -fsSL https://ngrok-agent.com/apt/gpg.key \
+     | gpg --dearmor -o /etc/apt/keyrings/ngrok.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.com/apt stable main" \
+     > /etc/apt/sources.list.d/ngrok.list \
+  \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends cloudflared tailscale ngrok \
+  && rm -rf /var/lib/apt/lists/*
+
+# tailscale serve/funnel needs the daemon's state directory persisted.
+RUN mkdir -p /var/lib/tailscale /app/server/data \
+  && chown -R node:node /app/server/data
+
+USER node
+
+ENV TUNNEL=local
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3001) + '/health').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1));"
+
+CMD ["node", "server/dist/index.js"]

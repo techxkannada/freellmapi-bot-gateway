@@ -81,6 +81,6 @@ EXPOSE 3001
 # declaration also shadows a bind mount made at the same path.
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3001) + '/api/ping').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1));"
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3001) + '/health').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1));"
 
 CMD ["node", "server/dist/index.js"]

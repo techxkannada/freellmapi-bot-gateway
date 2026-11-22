@@ -12,6 +12,7 @@ import { startBuiltinModelDiscovery } from './services/builtin-model-discovery.j
 import { installProcessSafetyNet } from './lib/process-safety-net.js';
 import { NodeScheduler } from './lib/scheduler.js';
 import { loadConfig } from './lib/config.js';
+import { setRoutingStrategy } from './services/router.js';
 import { applyDeclarativeConfigFromEnv } from './services/declarative-config.js';
 import { restoreDbBackupIfNeeded, startDbBackupPump } from './lib/db-backup.js';
 import { startBackupScheduler } from './services/backups.js';
@@ -23,6 +24,7 @@ import { installLogRedaction } from './lib/log-redaction.js';
 import { cleanupExpiredCooldowns } from './services/ratelimit.js';
 import { loadCacheFromDb } from './services/cache.js';
 import { installGracefulShutdown } from './lib/graceful-shutdown.js';
+import { getTunnelConfig, installTunnelShutdown, startTunnel } from './services/tunnel.js';
 
 // Before any other statement runs, so no provider key can reach stdout — users
 // paste server output into bug reports. Module scope, not inside main(), so it
@@ -47,6 +49,12 @@ async function main() {
   }
   initDb(config.dbPath ?? undefined);
   applyDeclarativeConfigFromEnv();
+  // ROUTING_STRATEGY is the small, explicit knob bot deployments need. The
+  // validated set lives in the router; an invalid value fails fast at boot
+  // rather than silently routing with the default.
+  if (process.env.ROUTING_STRATEGY?.trim()) {
+    setRoutingStrategy(process.env.ROUTING_STRATEGY.trim() as Parameters<typeof setRoutingStrategy>[0]);
+  }
   // After initDb: the unknown-model half of this check reads the catalog.
   warnOnRoutingOverrideDrift();
 
@@ -78,10 +86,20 @@ async function main() {
 
   const app = createApp(config);
 
-  const onReady = (host: string) => () => {
+  const onReady = (host: string) => async () => {
     const display = host.includes(':') ? `[${host}]` : host;
     console.log(`Server running on http://${display}:${PORT}`);
     console.log(`Proxy endpoint: http://${display}:${PORT}/v1/chat/completions`);
+
+    // Tunnel modes: auto-start unless TUNNEL_AUTOSTART=0. Public modes keep
+    // auth enabled (the unified key and dashboard session are unchanged).
+    installTunnelShutdown();
+    const tunnelConfig = getTunnelConfig();
+    if (tunnelConfig.autoStart) {
+      const status = await startTunnel();
+      if (status.url) console.log(`Public endpoint: ${status.url}/chat/completions`);
+      if (status.lastError) console.warn(`[tunnel] ${status.lastError}`);
+    }
     startHealthChecker(scheduler);
     startCatalogSync(scheduler);
     startCooldownProbe(scheduler);
