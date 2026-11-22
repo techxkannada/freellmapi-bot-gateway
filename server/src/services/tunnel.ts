@@ -361,8 +361,12 @@ function spawnChild(): void {
     lastError = err.message;
     console.error(`[tunnel] ${cfg.mode} failed to start: ${err.message}`);
   });
-  child.on('exit', code => {
-    if (child && child.pid === undefined) child = null;
+  const spawned = child;
+  spawned.on('exit', code => {
+    // A child that was already replaced by stop/restart is stale: its exit
+    // event can arrive after the next start cleared `stopping`, and would
+    // otherwise schedule a bogus reconnect for the NEW mode.
+    if (spawned !== child) return;
     if (stopping) return;
     // `tailscale serve --bg` / `funnel --bg` are one-shot commands: they hand
     // the listener to the tailscaled daemon and exit. The URL poll against

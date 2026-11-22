@@ -1,4 +1,15 @@
 import { nextMonthResetAt } from '../services/key-budget.js';
+// Operational counters for the self-hosted /metrics surface. Aliased because
+// ratelimit.js already exports recordRequest/recordTokens with a different
+// meaning (quota accounting vs. request counting).
+import {
+  recordRequest as countRequest,
+  recordFailedRequest as countFailedRequest,
+  recordFailover as countFailover,
+  recordRateLimit as countRateLimit,
+  recordUpstreamError as countUpstreamError,
+  recordTokens as countTokens,
+} from '../services/metrics.js';
 import { benchCloudflareAccount } from '../services/cloudflare-daily-quota.js';
 // One shared provider retry/fallback loop for every OpenAI-, Responses- and
 // Anthropic-shaped chat surface (routes/proxy.ts legacy /completions and
@@ -720,6 +731,7 @@ export function recordUpstreamSuccess(route: RouteResult, rateLimitTokens: numbe
   }
   recordRequest(route.platform, route.modelId, route.keyId);
   recordTokens(route.platform, route.modelId, route.keyId, rateLimitTokens);
+  countTokens(rateLimitTokens);
   recordSuccess(route.modelDbId);
   // A served request proves the model+key can complete: the empty-completion
   // streak (#751) starts over.
@@ -1425,9 +1437,13 @@ export async function runFallbackLoop(hooks: FallbackHooks): Promise<void> {
   // `requests` row was written (a pure abort writes its own 'canceled' row,
   // so its trace persists too).
   const trace = newRequestTrace();
+  countRequest();
   try {
     await runWithRequestTrace(trace, () => runFallbackLoopAttempts(hooks, trace));
   } finally {
+    if (!trace.records.some(r => r.outcome === 'ok' || r.outcome === 'committed')) {
+      countFailedRequest();
+    }
     persistRequestAttempts(trace);
   }
 }
@@ -1649,6 +1665,7 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
         attempts.push({ platform: route.platform, modelId: route.modelId, keyOrdinal: keyOrdinal(route), errorClass: 'auth' });
         traceAttempt('auth', err);
         lastError = err;
+        countFailover(route.keyLabel ?? `${route.platform}:${route.modelId}`);
         if (stopIfBreakerTripped()) return;
         continue;
       }
@@ -1684,6 +1701,9 @@ async function runFallbackLoopAttempts(hooks: FallbackHooks, trace: RequestTrace
         // either: three prose answers to a json_schema request say nothing
         // about whether candidate four is up. Once the empty-completion streak
         // lifts the exemption (#751), the failure counts everywhere.
+        countFailover(route.keyLabel ?? `${route.platform}:${route.modelId}`);
+        if (isRateLimitSignal(err)) countRateLimit();
+        else countUpstreamError();
         if (!exempt && stopIfBreakerTripped()) return;
         continue;
       }
