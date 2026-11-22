@@ -40,6 +40,31 @@ async function loadSocksAgent(): Promise<Ctor<unknown>> {
   return _socksAgentCtor;
 }
 
+// Optional HTTP/2 for DIRECT upstream calls (UPSTREAM_HTTP2=1). Proxied calls
+// keep their ProxyAgent/SocksAgent dispatcher: HTTP/2 through an HTTP proxy
+// needs CONNECT ALPN support the agent does not negotiate. The agent is built
+// lazily and reused, with the same 75s keep-alive window the inbound server
+// uses, so idle sockets survive a fronting reverse proxy.
+let _h2Agent: unknown | null = null;
+async function directFetch(url: string, init: RequestInit | undefined): Promise<Response> {
+  if (process.env.UPSTREAM_HTTP2 !== '1') return fetch(url, init);
+  try {
+    if (!_h2Agent) {
+      const undici = await import('undici');
+      _h2Agent = new undici.Agent({
+        allowH2: true,
+        keepAliveTimeout: 75_000,
+        headersTimeout: 76_000,
+      });
+    }
+    return await fetch(url, { ...init, dispatcher: _h2Agent } as unknown as RequestInit);
+  } catch {
+    // Some Node builds reject undici's web init (#proxy note above); a failed
+    // optional optimisation must never cost the request. Fall back to fetch.
+    return fetch(url, init);
+  }
+}
+
 // SOCKS schemes socks-proxy-agent understands. `socks5h`/`socks4a` are the
 // "resolve DNS at the proxy" variants (#630) — the ones that matter on
 // DNS-poisoned networks, where resolving the upstream hostname locally is

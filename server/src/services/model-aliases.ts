@@ -37,7 +37,10 @@ export function normalizeModelAlias(value: string | undefined): ModelAlias | nul
 /** Apply the alias's preset bias to THIS request. No-op outside a request. */
 export function applyModelAlias(value: string | undefined): ModelAlias | null {
   const alias = normalizeModelAlias(value);
-  if (alias) setRequestRoutingStrategy(MODEL_ALIASES[alias]);
+  // `auto` is the gateway's default and must keep whatever strategy the
+  // operator configured (priority chains, decision mode, per-bot bias). Only
+  // the three explicit aliases impose a preset on the request.
+  if (alias && alias !== 'auto') setRequestRoutingStrategy(MODEL_ALIASES[alias]);
   return alias;
 }
 

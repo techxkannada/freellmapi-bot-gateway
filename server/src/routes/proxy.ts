@@ -501,18 +501,6 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
     : listed;
 
   return [
-    ...modelAliasEntries().filter(entry => entry.id !== 'auto').map(entry => ({
-      id: entry.id,
-      object: 'model',
-      created: 0,
-      owned_by: entry.owned_by,
-      name: entry.name,
-      context_window: autoContextWindow,
-      context_length: autoContextWindow,
-      available: autoContextWindow != null,
-      unavailable_reason: autoContextWindow != null ? null : 'no_models',
-      routing_strategy: entry.strategy,
-    })),
     {
       id: AUTO_MODEL_ID,
       object: 'model',
@@ -527,6 +515,20 @@ function buildCatalogEntries(filters: { onlyAvailable?: boolean; executionStatus
       available: true,
       unavailable_reason: null,
     },
+    // Additive aliases come AFTER `auto`: clients and tests that treat the
+    // first entry as the default must keep seeing `auto`.
+    ...modelAliasEntries().filter(entry => entry.id !== 'auto').map(entry => ({
+      id: entry.id,
+      object: 'model',
+      created: 0,
+      owned_by: entry.owned_by,
+      name: entry.name,
+      context_window: autoContextWindow,
+      context_length: autoContextWindow,
+      available: autoContextWindow != null,
+      unavailable_reason: autoContextWindow != null ? null : 'no_models',
+      routing_strategy: entry.strategy,
+    })),
     {
       id: FUSION_MODEL_ID,
       object: 'model',
