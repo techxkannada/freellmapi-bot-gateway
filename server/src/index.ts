@@ -13,6 +13,7 @@ import { installProcessSafetyNet } from './lib/process-safety-net.js';
 import { NodeScheduler } from './lib/scheduler.js';
 import { loadConfig } from './lib/config.js';
 import { setRoutingStrategy } from './services/router.js';
+import { applyAutoSwitch } from './services/auto-switch.js';
 import { applyDeclarativeConfigFromEnv } from './services/declarative-config.js';
 import { restoreDbBackupIfNeeded, startDbBackupPump } from './lib/db-backup.js';
 import { startBackupScheduler } from './services/backups.js';
@@ -49,6 +50,9 @@ async function main() {
   }
   initDb(config.dbPath ?? undefined);
   applyDeclarativeConfigFromEnv();
+  // "Switch faster" preset: quota-headroom demotion, shorter hedge budget and
+  // lowest-latency key selection. Independently overridable by env/settings.
+  applyAutoSwitch();
   // ROUTING_STRATEGY is the small, explicit knob bot deployments need. The
   // validated set lives in the router; an invalid value fails fast at boot
   // rather than silently routing with the default.

@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { recordTunnelReconnect, setTunnelInfo } from './metrics.js';
-import { getUnifiedApiKey } from '../db/index.js';
+import { getSetting, getUnifiedApiKey, setSetting } from '../db/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -74,10 +74,28 @@ function fromArgv(): TunnelMode | null {
   return null;
 }
 
+export const TUNNEL_MODE_SETTING = 'tunnel_mode';
+
 function parseMode(): TunnelMode {
   const argvMode = fromArgv();
-  const raw = (argvMode ?? env('TUNNEL') ?? 'local').toLowerCase();
+  // Precedence: CLI flag > persisted dashboard choice > env > local. A mode
+  // picked in the dashboard must actually take effect even when .env still
+  // holds an older value, otherwise the control looks broken.
+  let persisted: string | null = null;
+  try { persisted = getSetting(TUNNEL_MODE_SETTING) ?? null; } catch { /* DB not ready yet */ }
+  const raw = String(argvMode ?? persisted ?? env('TUNNEL') ?? 'local').toLowerCase();
   return (TUNNEL_MODES as readonly string[]).includes(raw) ? raw as TunnelMode : 'local';
+}
+
+/** Persist the dashboard-selected mode. An explicit env/CLI flag still wins on
+ *  the next boot; this lets an operator change modes without editing .env. */
+export function setTunnelMode(mode: TunnelMode): TunnelMode {
+  if (!(TUNNEL_MODES as readonly string[]).includes(mode)) {
+    throw new Error(`Unknown tunnel mode: ${mode}`);
+  }
+  setSetting(TUNNEL_MODE_SETTING, mode);
+  configSnapshot = getTunnelConfig();
+  return configSnapshot.mode;
 }
 
 function lanAddress(): string {

@@ -14,6 +14,7 @@ interface TunnelStatus {
   lastError: string | null
   authRequired: boolean
   skipWarningHeader: string | null
+  config?: { availableModes: string[] }
 }
 
 export function TunnelSection() {
@@ -27,6 +28,15 @@ export function TunnelSection() {
   const control = useMutation({
     mutationFn: (action: 'start' | 'stop' | 'restart') =>
       apiFetch<TunnelStatus>(`/api/tunnel/${action}`, { method: 'POST' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tunnel'] }),
+  })
+
+  const switchMode = useMutation({
+    mutationFn: (mode: string) =>
+      apiFetch<TunnelStatus>('/api/tunnel/mode', {
+        method: 'POST',
+        body: JSON.stringify({ mode }),
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tunnel'] }),
   })
 
@@ -58,9 +68,20 @@ export function TunnelSection() {
       ) : (
         <div className="mt-4 space-y-3">
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">mode</span>
-            <code className="font-mono">{data?.mode ?? 'local'}</code>
+            <label className="text-muted-foreground" htmlFor="tunnel-mode">mode</label>
+            <select
+              id="tunnel-mode"
+              className="rounded-md border bg-background px-2 py-1 font-mono"
+              value={data?.mode ?? 'local'}
+              disabled={switchMode.isPending}
+              onChange={(e) => switchMode.mutate(e.target.value)}
+            >
+              {(data?.config?.availableModes ?? ['local', 'cloudflare', 'tailscale', 'ngrok']).map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
             {data?.authRequired && <span className="text-muted-foreground">· API key required</span>}
+            {switchMode.isPending && <span className="text-muted-foreground">switching…</span>}
           </div>
 
           <div>

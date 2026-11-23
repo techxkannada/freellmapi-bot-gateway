@@ -8,6 +8,7 @@ import {
   findBinary,
   getTunnelConfig,
   getTunnelStatus,
+  setTunnelMode,
   startTunnel,
   stopTunnel,
   waitForTunnelUrl,
@@ -116,6 +117,15 @@ describe('tunnel manager', () => {
     expect(await waitForTunnelUrl(5000)).toBe('https://smoke.ngrok-free.app/v1');
     await stopTunnel();
     await new Promise<void>(resolve => mock!.close(() => resolve()));
+  });
+
+  it('persists a dashboard-selected mode and applies it over a stale env value', () => {
+    vi.stubEnv('TUNNEL', 'local');
+    setTunnelMode('ngrok');
+    expect(getTunnelConfig().mode).toBe('ngrok');
+    expect(() => setTunnelMode('carrier-pigeon' as never)).toThrow(/Unknown tunnel mode/);
+    setTunnelMode('local');
+    expect(getTunnelConfig().mode).toBe('local');
   });
 
   it('getTunnelStatus never leaks a token', () => {

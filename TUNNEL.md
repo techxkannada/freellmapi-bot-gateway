@@ -61,6 +61,11 @@ button emits a ready `curl` command with this header, and
   `freellmapi_tunnel_reconnects_total` and is reported in `/metrics`.
 - `POST /api/tunnel/{start,stop,restart}` (dashboard session required) controls
   the tunnel live. `GET /api/tunnel/binaries` reports which binaries were found.
+- `POST /api/tunnel/mode` with `{"mode":"local|cloudflare|tailscale|ngrok"}`
+  switches mode at runtime and persists the choice. The dashboard mode selector
+  on **Keys → API key → Public tunnel** uses it. A persisted choice wins over a
+  stale `.env` value on the next boot; an explicit `--tunnel` CLI flag still
+  wins over both.
 - Graceful shutdown kills the child on SIGINT/SIGTERM.
 - **Public modes never disable authentication.** `/v1` still requires the unified
   or bot key; `/api/*` still requires the dashboard session. Set `TRUST_PROXY`

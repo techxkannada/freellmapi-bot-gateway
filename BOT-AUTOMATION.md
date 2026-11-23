@@ -59,6 +59,29 @@ Model aliases: `auto` (balanced), `fast` (fastest), `smart` (smartest), `coding`
 (quality-led; existing task-type detection handles code/tool bias). All four
 route through the full `auto` failover chain and appear in `/v1/models`.
 
+## Fast automatic switching
+
+```dotenv
+AUTO_FAST_SWITCH=1
+AUTO_SWITCH_QUOTA_PCT=70   # start avoiding a key at 70% used (default 80)
+AUTO_SWITCH_HEDGE_MS=6000  # fire the backup provider after 6s of silence
+```
+
+That applies three existing mechanisms together: quota-headroom demotion, a
+shorter failover time budget (which arms the hedge), and lowest-latency key
+selection. Runtime control:
+
+```bash
+curl http://localhost:3001/api/settings/auto-switch -H "Authorization: Bearer $DASH"
+curl -X PUT http://localhost:3001/api/settings/auto-switch \
+  -H "Authorization: Bearer $DASH" -H 'Content-Type: application/json' \
+  -d '{"enabled":true,"quotaSwitchPct":60,"hedgeTimeoutMs":4000}'
+```
+
+Model aliases report the preset they used in the `X-FreeLLM-Routing-Strategy`
+response header (`fastest` for `fast`, `smartest` for `smart`/`coding`,
+`balanced` for `auto`), so automation can verify the switch.
+
 ## Ops
 
 - Keep-alive pooling (75s inbound, undici upstream) and optional HTTP/2 for

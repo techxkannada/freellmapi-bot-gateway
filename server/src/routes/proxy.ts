@@ -4,7 +4,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type { ChatMessage, ChatToolCall, TokenUsage } from '@freellmapi/shared/types.js';
-import { type RouteResult, type ResolvedChain, type ChainRow, routeRequest, resolveRoutingChain, resolveModelGroupCandidates, resolveStickyPreference, hasEnabledVisionModel, hasEnabledToolsModel, routingReserveTokens, failureAttributionFor } from '../services/router.js';
+import { type RouteResult, type ResolvedChain, type ChainRow, routeRequest, resolveRoutingChain, resolveModelGroupCandidates, resolveStickyPreference, hasEnabledVisionModel, hasEnabledToolsModel, routingReserveTokens, failureAttributionFor, effectiveRoutingStrategy } from '../services/router.js';
 import { secondsUntilNextMonth, nextMonthResetAt } from '../services/key-budget.js';
 import { runEmbeddings, EmbeddingsError } from '../services/embeddings.js';
 import { runRerank, RerankError, rerankRetryAfterSec } from '../services/rerank.js';
@@ -2599,6 +2599,12 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // conversation is sticky to one. Any doubt routes as Balanced.
   const routingPick = await applyDecisionRouting(messages, { pinned: pinnedModelId != null || preferredModel != null, preset: resolvedChain?.strategyOverride, signal: clientAbort.signal });
   if (routingPick && !res.headersSent) res.setHeader('X-FreeLLM-Routing-Strategy', routingStrategyHeader(routingPick));
+  // Aliases (fast/smart/coding) and per-bot strategy overrides set a
+  // request-scoped preset. Report the EFFECTIVE strategy so automation can
+  // verify the switch actually happened.
+  if (!res.headersSent && !res.getHeader('X-FreeLLM-Routing-Strategy')) {
+    res.setHeader('X-FreeLLM-Routing-Strategy', effectiveRoutingStrategy());
+  }
 
   await runFallbackLoop({
     maxRetries: MAX_RETRIES,

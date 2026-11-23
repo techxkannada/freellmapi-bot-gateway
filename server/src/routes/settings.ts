@@ -25,6 +25,7 @@ import {
   setCompressionConfig,
 } from '../services/compression/config.js';
 import { getHeadroomThresholds, setHeadroomThresholds, getTaskWeightShare, setTaskWeightShare, getMinReliabilityFloor, setMinReliabilityFloor, isProviderMomentAttributionEnabled, setProviderMomentAttribution } from '../services/router.js';
+import { applyAutoSwitch, autoSwitchStatus, setAutoSwitchConfig } from '../services/auto-switch.js';
 import { MCP_ENABLED_SETTING, isMcpServerEnabled } from './mcp.js';
 import { z } from 'zod';
 import { getAppVersion } from '../lib/app-version.js';
@@ -342,6 +343,28 @@ const guardrailsPutSchema = z.object({
 // Get the headroom guardrail thresholds (#899): the remaining-budget fraction
 // at which proactive demotion begins and the score floor at 0 remaining. Both
 // are decimals (0.2 = 20%). null = the scoring.ts default is in effect.
+// Fast auto-switch preset (fork addition): one place to make the gateway move
+// off a slow or nearly-spent route sooner. GET shows the effective settings,
+// PUT persists a patch and applies it immediately.
+settingsRouter.get('/auto-switch', (_req: Request, res: Response) => {
+  res.json(autoSwitchStatus());
+});
+settingsRouter.put('/auto-switch', (req: Request, res: Response) => {
+  const body = req.body as Record<string, unknown>;
+  if (body.enabled !== undefined && typeof body.enabled !== 'boolean') {
+    return void res.status(400).json({ error: { message: 'enabled must be a boolean' } });
+  }
+  if (body.quotaSwitchPct !== undefined && (!Number.isFinite(body.quotaSwitchPct) || Number(body.quotaSwitchPct) < 1 || Number(body.quotaSwitchPct) > 99)) {
+    return void res.status(400).json({ error: { message: 'quotaSwitchPct must be 1..99' } });
+  }
+  if (body.hedgeTimeoutMs !== undefined && (!Number.isFinite(body.hedgeTimeoutMs) || Number(body.hedgeTimeoutMs) < 500 || Number(body.hedgeTimeoutMs) > 600000)) {
+    return void res.status(400).json({ error: { message: 'hedgeTimeoutMs must be 500..600000' } });
+  }
+  setAutoSwitchConfig(body as never);
+  const cfg = applyAutoSwitch();
+  res.json({ ...autoSwitchStatus(), applied: cfg });
+});
+
 settingsRouter.get('/headroom', (_req: Request, res: Response) => {
   const { rampStart, floor } = getHeadroomThresholds();
   res.json({ rampStart: rampStart ?? null, floor: floor ?? null });

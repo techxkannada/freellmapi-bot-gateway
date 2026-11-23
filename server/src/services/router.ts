@@ -793,7 +793,12 @@ export function effectiveRoutingStrategy(): RoutingStrategy {
 /** The key policy in force: the explicit key setting unless the global routing
  *  strategy is one of the three operator-facing selection policies. */
 export function effectiveKeySelectionStrategy(): KeySelectionStrategy {
-  return keyPolicyForStrategy(getRoutingStrategy()) ?? getKeySelectionStrategy();
+  // Request-scoped presets (bot key, alias, decision model) can imply a key
+  // policy too; otherwise fall back to the global strategy, then the explicit
+  // key-selection setting.
+  return keyPolicyForStrategy(effectiveRoutingStrategy())
+    ?? keyPolicyForStrategy(getRoutingStrategy())
+    ?? getKeySelectionStrategy();
 }
 
 function weightsFor(strategy: RoutingStrategy): RoutingWeights | null {

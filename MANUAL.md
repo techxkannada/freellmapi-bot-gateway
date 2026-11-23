@@ -205,7 +205,7 @@ See `TUNNEL.md` for every tunnel env var and the reconnect behaviour.
 | models | `GET/POST /api/models`, `GET/PATCH/DELETE /api/models/:id`, `POST /api/models/:id/test`, `DELETE /api/models/custom/:id` |
 | client profiles | `GET/POST /api/client-profiles`, `PATCH /api/client-profiles/:id`, `POST /api/client-profiles/:id/rotate`, `DELETE /api/client-profiles/:id` |
 | **bots (new)** | `GET/POST /api/bots`, `GET /api/bots/queue`, `GET/PATCH/DELETE /api/bots/:id`, `POST /api/bots/:id/rotate`, `GET /api/bots/:id/usage?days=7` |
-| **tunnel (new)** | `GET /api/tunnel`, `GET /api/tunnel/binaries`, `POST /api/tunnel/start`, `POST /api/tunnel/stop`, `POST /api/tunnel/restart` |
+| **tunnel (new)** | `GET /api/tunnel`, `GET /api/tunnel/binaries`, `POST /api/tunnel/start`, `POST /api/tunnel/stop`, `POST /api/tunnel/restart`, `POST /api/tunnel/mode` with `{"mode":"local|cloudflare|tailscale|ngrok"}` |
 | fallback/routing | `GET/PUT /api/fallback`, `GET/PUT /api/fallback/routing`, `GET /api/fallback/quota-forecast`, `GET /api/fallback/token-usage`, `GET /api/fallback/rate-limit-usage`, `GET/DELETE /api/fallback/penalty-inspector`, `POST /api/fallback/sort/:preset` |
 | profiles | `GET/POST /api/profiles`, `GET /api/profiles/active`, `POST /api/profiles/active`, `GET /api/profiles/:id/models`, `PUT/DELETE /api/profiles/:id`, `POST /api/profiles/:id/reset`, `PUT /api/profiles/:id/reorder`, `POST /api/profiles/:id/sort/:preset` |
 | health | `GET /api/health`, `POST /api/health/check/:keyId`, `POST /api/health/check-all`, `POST /api/health/quota/:keyId`, `POST /api/health/probe-models` |
@@ -259,6 +259,13 @@ curl -X POST http://localhost:3001/api/tunnel/restart -H "Authorization: Bearer 
 curl -X POST http://localhost:3001/api/tunnel/stop -H "Authorization: Bearer $DASH"
 ```
 
+Switch mode at runtime (persisted; beats a stale `.env` value on the next boot):
+
+```bash
+curl -X POST http://localhost:3001/api/tunnel/mode -H "Authorization: Bearer $DASH" \
+  -H 'Content-Type: application/json' -d '{"mode":"cloudflare"}'
+```
+
 For ngrok, send `Ngrok-Skip-Browser-Warning: 1` from every client.
 
 ---
@@ -278,7 +285,18 @@ curl -X PUT http://localhost:3001/api/fallback/routing \
 Strategies: `priority`, `balanced`, `smartest`, `fastest`, `reliable`,
 `round-robin`, `least-used`, `lowest-latency`, `custom`, `decision`.
 Key policies: `auto`, `least-remaining`, `round-robin`, `least-used`,
-`lowest-latency`. Model aliases: `auto`, `fast`, `smart`, `coding`.
+`lowest-latency`. Model aliases: `auto`, `fast`, `smart`, `coding` — the
+response header `X-FreeLLM-Routing-Strategy` reports the effective preset.
+
+One-knob fast switching (quota demotion + shorter hedge + lowest-latency key):
+
+```bash
+AUTO_FAST_SWITCH=1 AUTO_SWITCH_QUOTA_PCT=70 AUTO_SWITCH_HEDGE_MS=6000 npm start
+curl http://localhost:3001/api/settings/auto-switch -H "Authorization: Bearer $DASH"
+curl -X PUT http://localhost:3001/api/settings/auto-switch \
+  -H "Authorization: Bearer $DASH" -H 'Content-Type: application/json' \
+  -d '{"enabled":true,"quotaSwitchPct":60,"hedgeTimeoutMs":4000}'
+```
 
 ---
 
@@ -323,7 +341,8 @@ npm run simulate:bots
 `TAILSCALE_HOSTNAME`, `TAILSCALE_BIN`, `NGROK_AUTHTOKEN`, `NGROK_DOMAIN`,
 `NGROK_REGION`, `NGROK_API_PORT`, `NGROK_BIN`, `BOT_QUEUE_CONCURRENCY`,
 `BOT_QUEUE_MAX_DEPTH`, `BOT_QUEUE_TIMEOUT_MS`, `ROUTING_STRATEGY`,
-`UPSTREAM_HTTP2`, `PROXY_RATE_LIMIT_RPM`, `ADMIN_RATE_LIMIT_RPM`,
+`UPSTREAM_HTTP2`, `AUTO_FAST_SWITCH`, `AUTO_SWITCH_QUOTA_PCT`,
+`AUTO_SWITCH_HEDGE_MS`, `FALLBACK_TIME_BUDGET_MS`, `PROXY_RATE_LIMIT_RPM`, `ADMIN_RATE_LIMIT_RPM`,
 `TRUST_PROXY`, `ALLOWED_HOSTS`, `DASHBOARD_ORIGINS`,
 `REQUEST_BODY_LIMIT_MB`, `FREEAPI_CONFIG_JSON`, `FREEAPI_CONFIG_PATH`.
 Full list with comments: `.env.example`.
