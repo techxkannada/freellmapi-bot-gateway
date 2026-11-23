@@ -4,7 +4,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type { ChatMessage, ChatToolCall, TokenUsage } from '@freellmapi/shared/types.js';
-import { type RouteResult, type ResolvedChain, type ChainRow, routeRequest, resolveRoutingChain, resolveModelGroupCandidates, resolveStickyPreference, hasEnabledVisionModel, hasEnabledToolsModel, routingReserveTokens, failureAttributionFor, effectiveRoutingStrategy } from '../services/router.js';
+import { type RouteResult, type ResolvedChain, type ChainRow, routeRequest, resolveRoutingChain, resolveModelGroupCandidates, resolveStickyPreference, hasEnabledVisionModel, hasEnabledToolsModel, routingReserveTokens, failureAttributionFor } from '../services/router.js';
 import { secondsUntilNextMonth, nextMonthResetAt } from '../services/key-budget.js';
 import { runEmbeddings, EmbeddingsError } from '../services/embeddings.js';
 import { runRerank, RerankError, rerankRetryAfterSec } from '../services/rerank.js';
@@ -44,6 +44,7 @@ import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../servi
 import { applyModelAlias, isModelAlias, modelAliasEntries } from '../services/model-aliases.js';
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
+import { getClientContext } from '../lib/client-context.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
 
 export const proxyRouter = Router();
@@ -2600,10 +2601,12 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   const routingPick = await applyDecisionRouting(messages, { pinned: pinnedModelId != null || preferredModel != null, preset: resolvedChain?.strategyOverride, signal: clientAbort.signal });
   if (routingPick && !res.headersSent) res.setHeader('X-FreeLLM-Routing-Strategy', routingStrategyHeader(routingPick));
   // Aliases (fast/smart/coding) and per-bot strategy overrides set a
-  // request-scoped preset. Report the EFFECTIVE strategy so automation can
-  // verify the switch actually happened.
-  if (!res.headersSent && !res.getHeader('X-FreeLLM-Routing-Strategy')) {
-    res.setHeader('X-FreeLLM-Routing-Strategy', effectiveRoutingStrategy());
+  // REQUEST-SCOPED preset. Report it so automation can verify the switch
+  // happened, but stay silent when only the global default applies (existing
+  // clients treat this header as a decision-routing signal).
+  const scopedPreset = getClientContext().routingStrategy;
+  if (scopedPreset && !res.headersSent && !res.getHeader('X-FreeLLM-Routing-Strategy')) {
+    res.setHeader('X-FreeLLM-Routing-Strategy', scopedPreset);
   }
 
   await runFallbackLoop({
